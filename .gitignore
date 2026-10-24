@@ -1,0 +1,39 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.migration.example
+!.env.example
+
+# --- Private keys / local credential files ---
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+id_rsa
+id_ed25519
+*.crt
+
+# --- Logs ---
+*.log
+
+# --- Migration run artifacts (regenerated on every run) ---
+migrate_images_manifest_*.csv
+migrate_images_rollback_*.csv
+migrate_images_*.log
+
+# --- Database dumps containing personal information ---
+*.sql
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

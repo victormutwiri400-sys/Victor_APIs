@@ -1,0 +1,255 @@
+diff --git a/src/components/Dining.jsx b/src/components/Dining.jsx
+index 12b1e7f..2212fa0 100644
+--- a/src/components/Dining.jsx
++++ b/src/components/Dining.jsx
+@@ -2,6 +2,7 @@ import axios from "axios";
+ import React, { useEffect, useState } from "react";
+ import { useNavigate, useLocation } from "react-router-dom";
+ import Pagination from "./Pagination";
++import { buildImageUrl } from "../utils/imageUrl";
+ 
+ function DiningImage({ src, alt }) {
+   const [imageRef, setImageRef] = useState(null);
+@@ -86,7 +87,6 @@ function GetDining() {
+   const [cacheVersion, setCacheVersion] = useState(Date.now());
+ 
+   const bookedRoom = location.state?.room || location.state?.product || null;
+-  const img_url = "https://victordesigner.alwaysdata.net/static/images/";
+   const auth = JSON.parse(localStorage.getItem("user") || "null");
+   const isAdmin = auth?.role === "admin";
+ 
+@@ -218,7 +218,7 @@ function GetDining() {
+             <div key={p.dining_id} className="col-md-3 mb-4">
+               <div className="card h-100 shadow-sm border-0">
+                 <DiningImage
+-                  src={p.photo ? `${img_url}${p.photo.toLowerCase()}?v=${cacheVersion}` : "https://placehold.co/600x400?text=No+Image"}
++                  src={p.photo ? `${buildImageUrl(p.photo, "images", { lower: true })}?v=${cacheVersion}` : "https://placehold.co/600x400?text=No+Image"}
+                   alt={p.name}
+                 />
+                 <div className="card-body d-flex flex-column">
+diff --git a/src/components/Gallery.jsx b/src/components/Gallery.jsx
+index 965a2aa..09c1b72 100644
+--- a/src/components/Gallery.jsx
++++ b/src/components/Gallery.jsx
+@@ -1,5 +1,6 @@
+ import axios from "axios";
+ import React, { useEffect, useState } from "react";
++import { buildImageUrl } from "../utils/imageUrl";
+ 
+ function GalleryImage({ src, alt }) {
+   const [imageRef, setImageRef] = useState(null);
+@@ -70,7 +71,6 @@ function GetGallery() {
+   const [photos, setPhotos] = useState([]);
+   const [loading, setLoading] = useState("");
+   const [error, setError] = useState("");
+-  const img_url = "https://victordesigner.alwaysdata.net/static/gallery/";
+ 
+   // Fetch gallery photos
+   const getPhotos = async () => {
+@@ -100,7 +100,7 @@ function GetGallery() {
+           <div key={photo.id} className="col-md-4 mb-4">
+             <div className="card shadow">
+               <GalleryImage
+-                src={img_url + photo.photo}
++                src={buildImageUrl(photo.photo, "gallery")}
+                 alt={photo.description}
+               />
+               <div className="card-body text-center">
+diff --git a/src/components/History.jsx b/src/components/History.jsx
+index 6162cbe..ee052c3 100644
+--- a/src/components/History.jsx
++++ b/src/components/History.jsx
+@@ -1,6 +1,7 @@
+ import axios from "axios";
+ import React, { useEffect, useState } from "react";
+ import { useNavigate } from "react-router-dom";
++import { buildImageUrl } from "../utils/imageUrl";
+ 
+ const Orders = () => {
+     const [history, setHistory] = useState([]);
+@@ -8,9 +9,6 @@ const Orders = () => {
+     const [error, setError] = useState("");
+     const navigate = useNavigate();
+ 
+-    const ROOM_URL = "https://victordesigner.alwaysdata.net/static/rooms/";
+-    const DINING_URL = "https://victordesigner.alwaysdata.net/static/images/";
+-
+     useEffect(() => {
+         const fetchData = async () => {
+             const authData = JSON.parse(localStorage.getItem("user"));
+@@ -46,7 +44,7 @@ const Orders = () => {
+                     desc: `${new Date(item.check_in).toLocaleDateString()} - ${new Date(item.check_out).toLocaleDateString()}`,
+                     cost: item.price, 
+                     date: item.booking_date,
+-                    photo: item.photo, // This pulls from ROOM_URL
++                    photo: item.photo, // resolved by buildImageUrl (rooms legacy dir)
+                     isRoom: true
+                 }));
+ 
+@@ -58,7 +56,7 @@ const Orders = () => {
+                     desc: `Qty: ${item.quantity} | ${item.description}`,
+                     cost: item.total_cost,
+                     date: item.order_date,
+-                    photo: item.photo, // This pulls from DINING_URL
++                    photo: item.photo, // resolved by buildImageUrl (dining legacy dir)
+                     isRoom: false
+                 }));
+ 
+@@ -97,7 +95,7 @@ const Orders = () => {
+                         <div className="card h-100 shadow-sm border-0 rounded-4 overflow-hidden">
+                             <div className="position-relative">
+                                 <img 
+-                                    src={item.isRoom ? ROOM_URL + item.photo : DINING_URL + item.photo} 
++                                    src={buildImageUrl(item.photo, item.isRoom ? "rooms" : "images")} 
+                                     alt={item.title} 
+                                     className="card-img-top"
+                                     style={{ height: "180px", objectFit: "cover" }}
+diff --git a/src/components/Layout.jsx b/src/components/Layout.jsx
+index f1fc490..8a38a6c 100644
+--- a/src/components/Layout.jsx
++++ b/src/components/Layout.jsx
+@@ -6,6 +6,7 @@ import {
+ } from "react-icons/fa"; 
+ import { useNavigate, useLocation } from "react-router-dom";
+ import axios from "axios";
++import { buildImageUrl } from "../utils/imageUrl";
+ 
+ const Layout = ({ children }) => {
+   const navigate = useNavigate();
+@@ -167,7 +168,7 @@ useEffect(() => {
+                 <Dropdown.Toggle variant="light" className="d-flex align-items-center border-0 bg-transparent shadow-none">
+                   {currentUser?.photo ? (
+                     <img 
+-                      src={`https://victordesigner.alwaysdata.net/static/profiles/${currentUser.photo}`} 
++                      src={buildImageUrl(currentUser.photo, "profiles")} 
+                       alt="User" className="rounded-circle me-2 border"
+                       style={{ width: "38px", height: "38px", objectFit: "cover" }}
+                     />
+@@ -179,7 +180,7 @@ useEffect(() => {
+                   <Dropdown.Header className="text-center border-bottom pb-3">
+                     <label htmlFor="nav-upload-photo" style={{ cursor: 'pointer' }}>
+                       {currentUser?.photo ? (
+-                        <img src={`https://victordesigner.alwaysdata.net/static/profiles/${currentUser.photo}`} className="rounded-circle mb-2 border shadow-sm" style={{ width: "65px", height: "65px", objectFit: "cover" }} alt="Profile" />
++                        <img src={buildImageUrl(currentUser.photo, "profiles")} className="rounded-circle mb-2 border shadow-sm" style={{ width: "65px", height: "65px", objectFit: "cover" }} alt="Profile" />
+                       ) : <FaUserCircle size={65} className="text-secondary mb-2" />}
+                       <div className="small text-primary fw-bold"><FaCamera /> Update Photo</div>
+                     </label>
+diff --git a/src/components/Mpesa.jsx b/src/components/Mpesa.jsx
+index 93e1eba..d8e0e59 100644
+--- a/src/components/Mpesa.jsx
++++ b/src/components/Mpesa.jsx
+@@ -1,6 +1,7 @@
+ import axios from 'axios';
+ import React, { useState } from 'react';
+ import { useLocation,} from 'react-router-dom';
++import { buildImageUrl } from '../utils/imageUrl';
+ 
+ const Mpesa = () => {
+     const [phone, setPhone] = useState("");
+@@ -8,9 +9,6 @@ const Mpesa = () => {
+     const [error, setError] = useState(""); // Added error state for validation feedback
+     const location = useLocation();
+     
+-    const ROOM_URL = "https://victordesigner.alwaysdata.net/static/rooms/";
+-    const DINING_URL = "https://victordesigner.alwaysdata.net/static/images/";
+-
+     const { room, meal } = location.state || {};
+     const selectedItems = [];
+     if (room) selectedItems.push({ ...room, category: "Room Reservation" });
+@@ -73,7 +71,7 @@ const Mpesa = () => {
+                             <div key={index} className="col-md-6">
+                                 <div className="card p-2 bg-light text-center border-0 shadow-sm">
+                                     <img 
+-                                        src={item.category === "Room Reservation" ? ROOM_URL + item.product_photo : DINING_URL + item.product_photo} 
++                                        src={buildImageUrl(item.product_photo, item.category === "Room Reservation" ? "rooms" : "images")} 
+                                         style={{ height: "120px", objectFit: "cover" }} className="rounded mb-2" alt=""
+                                         onError={(e) => { e.target.src = "https://via.placeholder.com/150"; }}
+                                     />
+diff --git a/src/components/Profile.jsx b/src/components/Profile.jsx
+index e688331..8468145 100644
+--- a/src/components/Profile.jsx
++++ b/src/components/Profile.jsx
+@@ -1,6 +1,7 @@
+ import React, { useEffect, useState } from 'react';
+ import { useNavigate } from 'react-router-dom';
+ import { FaUserCircle, FaEnvelope, FaPhone, FaIdBadge, FaSignOutAlt } from 'react-icons/fa';
++import { buildImageUrl } from '../utils/imageUrl';
+ 
+ function Profile() {
+   const navigate = useNavigate();
+@@ -38,7 +39,7 @@ function Profile() {
+               <div className="mb-3">
+                 {person.photo ? (
+                   <img 
+-                    src={`https://victordesigner.alwaysdata.net/static/profiles/${person.photo}`} 
++                    src={buildImageUrl(person.photo, "profiles")} 
+                     alt="Full Profile" 
+                     className="rounded-circle  border-4 border-white shadow"
+                     style={{ width: "120px", height: "120px", objectFit: "cover" }}
+diff --git a/src/components/Rooms.jsx b/src/components/Rooms.jsx
+index c2e3e76..ab738b0 100644
+--- a/src/components/Rooms.jsx
++++ b/src/components/Rooms.jsx
+@@ -2,6 +2,7 @@ import axios from 'axios'
+ import React, { useEffect, useState } from 'react'
+ import { useNavigate } from 'react-router-dom'
+ import Pagination from './Pagination'
++import { buildImageUrl } from '../utils/imageUrl'
+ 
+ function RoomImage({ src, alt }) {
+   const [imageRef, setImageRef] = useState(null)
+@@ -77,7 +78,6 @@ function Rooms() {
+   const [priceOrder, setPriceOrder] = useState("low-high")
+   const itemsPerPage = 8 
+ 
+-  const img_url = "https://victordesigner.alwaysdata.net/static/rooms/"
+   const navigate = useNavigate()
+   const auth = JSON.parse(localStorage.getItem("user") || "null")
+   const isAdmin = auth?.role === "admin"
+@@ -191,7 +191,7 @@ function Rooms() {
+               <div key={room.room_id} className='col-md-3 mb-4'>
+                 <div className='card shadow-sm h-100 border-0'>
+                   <RoomImage
+-                    src={img_url + room.photo}
++                    src={buildImageUrl(room.photo, "rooms")}
+                     alt={room.description}
+                   />
+ 
+diff --git a/src/utils/imageUrl.js b/src/utils/imageUrl.js
+new file mode 100644
+index 0000000..155a3e9
+--- /dev/null
++++ b/src/utils/imageUrl.js
+@@ -0,0 +1,32 @@
++/**
++ * Shared image-URL resolver for legacy local filenames and Cloudinary URLs.
++ *
++ * After the Cloudinary migration every `photo` field returned by the API can be
++ * either:
++ *   - a full URL (e.g. https://res.cloudinary.com/...)  -> returned as-is
++ *   - a legacy bare filename (e.g. 'master5.jpg')       -> resolved against
++ *     the legacy AlwaysData static folder.
++ *
++ * `folder` must be one of the legacy static sub-folders:
++ *   "images" (dining), "gallery", "rooms", "profiles".
++ *
++ * `{ lower }` only affects legacy filenames (historical behavior of Dining);
++ * full URLs are NEVER lowercased or re-prefixed.
++ */
++const STATIC_BASE = "https://victordesigner.alwaysdata.net/static";
++
++export function buildImageUrl(photo, folder, { lower = false } = {}) {
++  if (!photo) return "";
++  const value = String(photo).trim();
++  if (/^https?:\/\//i.test(value)) return value; // full URL: use as-is
++  let name = value;
++  if (lower) name = name.toLowerCase();
++  return `${STATIC_BASE}/${folder}/${name}`;
++}
++
++export const IMAGE_FOLDERS = {
++  dining: "images",
++  gallery: "gallery",
++  rooms: "rooms",
++  profiles: "profiles",
++};
