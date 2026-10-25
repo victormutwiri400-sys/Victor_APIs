@@ -1,5 +1,9 @@
 # Environment Variables & Configuration
 
+The deployment also requires `MPESA_CALLBACK_URL` and accepts
+`CORS_ALLOWED_ORIGINS` as a comma-separated frontend-origin allowlist. Keep
+real values only in the hosting provider's environment settings.
+
 This backend reads **all secrets from environment variables**. It never falls
 back to hardcoded credentials, and it **fails fast** at startup if a required
 variable is missing (the error message names the variable, never its value).
@@ -31,7 +35,7 @@ hosting platform, not a local file). Two options for local runs:
 
 **Option A — set the variables in your shell (PowerShell):**
 ```powershell
-$env:MYSQL_PASSWORD="project_1234"
+$env:MYSQL_PASSWORD=""
 $env:CLOUDINARY_CLOUD_NAME="nxkypqxa"
 $env:CLOUDINARY_API_KEY="134235845124775"
 $env:CLOUDINARY_API_SECRET="ojDy41cD-Y0aRbbEqBC223CbLzs"

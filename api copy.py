@@ -1,5 +1,6 @@
 # import flask
 from flask import *
+from flask import g
 # importing pymysql
 import pymysql
 # importing dictcursor
@@ -60,7 +61,22 @@ app = Flask(__name__)
 # the API keeps using localStorage-based auth, so this is optional).
 if FLASK_SECRET_KEY:
     app.secret_key = FLASK_SECRET_KEY
-CORS(app)
+
+# CORS: allow ONLY explicitly configured trusted origins. Never unrestricted.
+# Set CORS_ALLOWED_ORIGINS (comma-separated full origins) in the environment,
+# e.g. "https://hotel-luxe.vercel.app,http://localhost:3000". The default list
+# keeps the legacy AlwaysData host + local dev working until you configure the
+# Vercel frontend origin.
+CORS_ORIGINS_DEFAULT = (
+    os.environ.get("CORS_ALLOWED_ORIGINS")
+    or "http://localhost:3000,http://127.0.0.1:3000,https://victordesigner.alwaysdata.net"
+)
+CORS_ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in CORS_ORIGINS_DEFAULT.split(",")
+    if origin.strip().rstrip("/")
+]
+CORS(app, resources={r"/api/*": {"origins": CORS_ALLOWED_ORIGINS}})
 
 # signup route
 @app.route("/api/signup", methods=["POST"])
@@ -70,12 +86,7 @@ def signup():
     phone_number = request.form["phone_number"]
     password = request.form["password"]
 
-    connection = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE,
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     sql = "INSERT INTO users (username, email, phone_number, password) VALUES (%s, %s, %s, %s)"
     data = (username, email, phone_number, password,)
@@ -114,12 +125,7 @@ def Profile():
             photo_url = upload_result["secure_url"]
 
         # 4. Database Connection
-        connection = pymysql.connect(
-            host=MYSQL_HOST,
-            user=MYSQL_USER,
-            password=MYSQL_PASSWORD,
-            database=MYSQL_DATABASE,
-        )
+        connection = get_db_connection()
         cursor = connection.cursor()
 
         # 5. Build Dynamic SQL 
@@ -155,12 +161,7 @@ def create_admin():
     admin_email = request.form["admin_email"]
     admin_password = request.form["admin_password"]
 
-    connection = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor(pymysql.cursors.DictCursor)
     sql = "SELECT * FROM admins WHERE email = %s AND password = %s AND role = 'superadmin'"
     data = (admin_email, admin_password)
@@ -187,12 +188,7 @@ def signin():
     email = request.form["email"]
     password = request.form["password"]
 
-    connection = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor(pymysql.cursors.DictCursor)
 
     # Check regular users
@@ -222,12 +218,7 @@ def bookRoom():
     check_in = request.form["check_in"]
     check_out = request.form["check_out"]
 
-    connection = pymysql.connect(
-        host=MYSQL_HOST,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     
     # ONLY perform the insertion into bookings
@@ -244,7 +235,7 @@ def bookRoom():
 
 @app.route("/api/all_bookings")
 def getAllBookings():
-    db = pymysql.connect(user=MYSQL_USER, host=MYSQL_HOST, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, cursorclass=pymysql.cursors.DictCursor)
+    db = get_db_connection(cursorclass=pymysql.cursors.DictCursor)
     with db.cursor() as cur:
         cur.execute("SELECT *, CASE WHEN CURDATE() > check_out THEN 'Free' WHEN CURDATE() BETWEEN check_in AND check_out THEN 'Occupied' ELSE 'Upcoming' END AS status FROM bookings ORDER BY check_in DESC")
         items = cur.fetchall()
@@ -273,12 +264,7 @@ def addDining():
     )
     photo_url = upload_result["secure_url"]
 
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     
     sql = "INSERT INTO dining (name, description, price, photo, category) VALUES (%s, %s, %s, %s, %s)"
@@ -319,12 +305,7 @@ def addDiningCloudinary():
     # e.g. https://res.cloudinary.com/nxkypqxa/image/upload/v1234/hotel_management/dining/photo.jpg
 
     # 5. Save the URL into the database instead of a local file path
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     sql = "INSERT INTO dining (name, description, price, photo, category) VALUES (%s, %s, %s, %s, %s)"
     data = (name, description, price, photo_url, category)
@@ -354,12 +335,7 @@ def addGallery():
     )
     photo_url = upload_result["secure_url"]
 
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     sql = "INSERT INTO gallery (name, description, photo) VALUES (%s, %s, %s)"
     data = (name, description, photo_url)
@@ -380,12 +356,7 @@ def placeOrders():
     specific_address = data.get('specific_address')
     orders = data.get('orders', [])
 
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     
     try:
         cursor = connection.cursor()
@@ -413,7 +384,7 @@ def placeOrders():
 
 @app.route("/api/all_orders")
 def getAllOrders():
-    db = pymysql.connect(user=MYSQL_USER, host=MYSQL_HOST, password=MYSQL_PASSWORD, database=MYSQL_DATABASE, cursorclass=pymysql.cursors.DictCursor)
+    db = get_db_connection(cursorclass=pymysql.cursors.DictCursor)
     with db.cursor() as cur:
         # We explicitly calculate total_cost here so the frontend can see it
         cur.execute("SELECT o.*, u.username, d.name, (d.price * o.quantity) AS total_cost FROM orders o JOIN dining d ON o.dining_id = d.dining_id LEFT JOIN users u ON o.user_id = u.user_id ORDER BY o.order_date DESC")
@@ -422,12 +393,7 @@ def getAllOrders():
 
 @app.route("/api/orders/<int:user_id>", methods=['GET'])
 def getOrders(user_id):
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor(pymysql.cursors.DictCursor)
     sql = """SELECT o.order_id, d.name, d.description, d.price, o.quantity,
                     (d.price * o.quantity) AS total_cost, o.order_date, d.photo, o.booking_id
@@ -457,12 +423,7 @@ def addRoom():
     )
     photo_url = upload_result["secure_url"]
 
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     cursor = connection.cursor()
     sql = "INSERT INTO rooms (description, price, photo) VALUES (%s, %s, %s)"
     data = (description, price, photo_url)
@@ -475,12 +436,7 @@ def addRoom():
 
 @app.route("/api/user_bookings/<int:user_id>", methods=['GET'])
 def getUserBookings(user_id):
-    connection = pymysql.connect(
-        user=MYSQL_USER,
-        host=MYSQL_HOST,
-        password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
-    )
+    connection = get_db_connection()
     try:
         cursor = connection.cursor(pymysql.cursors.DictCursor)
         
@@ -504,13 +460,7 @@ def getUserBookings(user_id):
 @app.route("/api/rooms", methods=['GET'])
 def rooms():
     try:
-        connection = pymysql.connect(
-            user=MYSQL_USER, 
-            host=MYSQL_HOST, 
-            password=MYSQL_PASSWORD, 
-            database=MYSQL_DATABASE,
-            cursorclass=pymysql.cursors.DictCursor
-        )
+        connection = get_db_connection(cursorclass=pymysql.cursors.DictCursor)
         cursor = connection.cursor()
         
         # This query joins on room_id (from rooms) and room_number (from bookings)
@@ -536,7 +486,7 @@ def rooms():
 
 @app.route("/api/dining", methods=['GET'])
 def dining():
-    connection = pymysql.connect(user=MYSQL_USER, host=MYSQL_HOST, password=MYSQL_PASSWORD, database=MYSQL_DATABASE)
+    connection = get_db_connection()
     cursor = connection.cursor(pymysql.cursors.DictCursor)
     cursor.execute("select * from dining")
     data = cursor.fetchall()
@@ -546,21 +496,47 @@ def dining():
 
 @app.route("/api/gallery", methods=['GET'])
 def gallery():
-    connection = pymysql.connect(user=MYSQL_USER, host=MYSQL_HOST, password=MYSQL_PASSWORD, database=MYSQL_DATABASE)
+    connection = get_db_connection()
     cursor = connection.cursor(pymysql.cursors.DictCursor)
     cursor.execute("select * from gallery")
     data = cursor.fetchall()
     connection.close()
     return jsonify(data)
 
-def get_db_connection():
-    """Helper function using your exact Alwaysdata credentials."""
-    return pymysql.connect(
+def get_db_connection(cursorclass=None):
+    """Open a NEW MySQL connection for this request and register it for
+    guaranteed teardown close (serverless-safe). One connection per request,
+    never shared across requests. Routes keep their own explicit close();
+    the teardown hook below is the safety net for error paths.
+    """
+    connection = pymysql.connect(
         host=MYSQL_HOST,
         user=MYSQL_USER,
         password=MYSQL_PASSWORD,
-        database=MYSQL_DATABASE
+        database=MYSQL_DATABASE,
+        cursorclass=cursorclass,
+        connect_timeout=5,
+        read_timeout=30,
+        write_timeout=30,
     )
+    if "db_connections" not in g:
+        g.db_connections = []
+    g.db_connections.append(connection)
+    return connection
+
+
+@app.teardown_request
+def _close_db_connections(exception=None):
+    """Guaranteed cleanup of every request-scoped connection on serverless."""
+    connections = g.pop("db_connections", None)
+    if not connections:
+        return
+    for connection in connections:
+        try:
+            connection.close()
+        except Exception:
+            # Already closed by the route, or closing failed; never 500.
+            pass
 
 
 # ==========================================================
