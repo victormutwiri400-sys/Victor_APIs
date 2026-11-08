@@ -1,4 +1,4 @@
-# import flask
+﻿# import flask
 from flask import *
 from flask import g
 # importing pymysql
@@ -15,7 +15,7 @@ import cloudinary.uploader
 import cloudinary.api
 
 # =====================================================================
-# SECRETS & CONFIGURATION — environment variables only.
+# SECRETS & CONFIGURATION â€” environment variables only.
 # The application FAILS FAST at startup if a required variable is
 # missing. The error names the variable but NEVER its value.
 # =====================================================================
@@ -624,49 +624,50 @@ def update_room():
     room_id = request.form.get("room_id")
     description = request.form.get("description")
     price = request.form.get("price")
-    
+   
     if not room_id:
         return jsonify({"Error": "Missing room_id"}), 400
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
 
-    update_fields = []
-    data_values = []
+        update_fields = []
+        data_values = []
 
-    if description:
-        update_fields.append("description = %s")
-        data_values.append(description)
-    if price:
-        update_fields.append("price = %s")
-        data_values.append(float(price))
+        if description:
+            update_fields.append("description = %s")
+            data_values.append(description)
+        if price:
+            update_fields.append("price = %s")
+            data_values.append(float(price))
 
-    if 'photo' in request.files:
-        photo = request.files['photo']
-        if photo and photo.filename:
-            try:
-                photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
-            except ValueError as ve:
-                return jsonify({"Error": str(ve)}), 400
-            except RuntimeError as re:
-                return jsonify({"Error": str(re)}), 500
-            update_fields.append("photo = %s")
-            data_values.append(photo_url)
+        if 'photo' in request.files:
+            photo = request.files['photo']
+            if photo and photo.filename:
+                try:
+                    photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
+                except ValueError as ve:
+                    return jsonify({"Error": str(ve)}), 400
+                except RuntimeError as re:
+                    return jsonify({"Error": str(re)}), 500
+                update_fields.append("photo = %s")
+                data_values.append(photo_url)
 
-    if not update_fields:
-        return jsonify({"Message": "No update fields were provided."}), 400
+        if not update_fields:
+            return jsonify({"Message": "No update fields were provided."}), 400
 
-    sql = f"UPDATE rooms SET {', '.join(update_fields)} WHERE room_id = %s"
-    data_values.append(room_id)
-    
-    cursor.execute(sql, tuple(data_values))
-    connection.commit()
-    connection.close()
+        sql = f"UPDATE rooms SET {', '.join(update_fields)} WHERE room_id = %s"
+        data_values.append(room_id)
 
-    return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
+        cursor.execute(sql, tuple(data_values))
+        connection.commit()
+        connection.close()
 
-
-
+        return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 @app.route('/api/updateGallery', methods=['POST'])
 def update_gallery():
     gallery_id = request.form.get("gallery_id")
@@ -746,6 +747,7 @@ def mpesa_payment():
     headers = {"Authorization": access_token, "Content-Type": "application/json"}
     response = requests.post("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", json=payload, headers=headers)
     return jsonify({"message": "Please Complete Payment in Your Phone."})
+
 
 
 
