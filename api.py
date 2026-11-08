@@ -56,6 +56,41 @@ cloudinary.config(
   secure = True
 )
 
+# Allowed image extensions for upload validation.
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+
+
+def _allowed_image(filename):
+    """Return True if the filename has an allowed image extension."""
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
+
+
+def _upload_to_cloudinary(photo, folder):
+    """Validate and upload a FileStorage image to Cloudinary.
+
+    Returns the secure_url on success. Raises ValueError on validation failure
+    or RuntimeError on Cloudinary/upload failure. Never exposes Cloudinary
+    credentials to the caller.
+    """
+    if not photo or not photo.filename:
+        raise ValueError("No photo provided")
+    if not _allowed_image(photo.filename):
+        raise ValueError(
+            "Invalid image type. Allowed: jpg, jpeg, png, gif, webp"
+        )
+    try:
+        upload_result = cloudinary.uploader.upload(
+            photo,
+            folder=folder,
+            resource_type="image",
+            use_filename=True,
+            unique_filename=True,
+        )
+        return upload_result["secure_url"]
+    except Exception as exc:
+        raise RuntimeError("Cloudinary upload failed: " + str(exc))
+
+
 # initializing the flask app
 app = Flask(__name__)
 # Use an explicit signing key when one is provided (sessions/tokens only;
@@ -252,14 +287,12 @@ def addDining():
     if not photo or not photo.filename:
         return jsonify({"Error": "No photo uploaded in the 'photo' field"}), 400
 
-    upload_result = cloudinary.uploader.upload(
-        photo,
-        folder="hotel_management/dining",
-        resource_type="image",
-        use_filename=True,
-        unique_filename=True
-    )
-    photo_url = upload_result["secure_url"]
+    try:
+        photo_url = _upload_to_cloudinary(photo, "home/hotel dining")
+    except ValueError as ve:
+        return jsonify({"Error": str(ve)}), 400
+    except RuntimeError as re:
+        return jsonify({"Error": str(re)}), 500
 
     connection = get_db_connection()
     cursor = connection.cursor()
@@ -276,70 +309,65 @@ def addDining():
 
 @app.route("/api/addDiningCloudinary", methods=['POST'])
 def addDiningCloudinary():
-    # 1. Retrieve text fields from the form
-    name = request.form['name']
-    description = request.form['description']
-    price = request.form['price']
-    category = request.form['category']
+    try:
+        # 1. Retrieve text fields from the form
+        name = request.form.get('name')
+        description = request.form.get('description')
+        price = request.form.get('price')
+        category = request.form.get('category')
 
-    # 2. Retrieve the file from the form
-    photo = request.files.get('photo')
-    if not photo or photo.filename == '':
-        return jsonify({"Error": "No photo uploaded in the 'photo' field"}), 400
+        # 2. Retrieve the file from the form
+        photo = request.files.get('photo')
 
-    # 3. Upload directly to Cloudinary (no temp file / local path needed).
-    #    Flask's FileStorage object is accepted straight from the form stream.
-    upload_result = cloudinary.uploader.upload(
-        photo,                               # the FileStorage from request.files
-        folder="hotel_management/dining",    # creates/uses this folder in Cloudinary
-        resource_type="image",
-        use_filename=True,                   # keep a human-readable name
-        unique_filename=True                 # adds a suffix if the name already exists
-    )
+        try:
+            photo_url = _upload_to_cloudinary(photo, "home/hotel dining")
+        except ValueError as ve:
+            return jsonify({"Error": str(ve)}), 400
+        except RuntimeError as re:
+            return jsonify({"Error": str(re)}), 500
 
-    # 4. Grab the HTTPS URL so it can be stored in MySQL
-    photo_url = upload_result["secure_url"]
-    # e.g. https://res.cloudinary.com/nxkypqxa/image/upload/v1234/hotel_management/dining/photo.jpg
+        # 3. Save the URL into the database instead of a local file path
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        sql = "INSERT INTO dining (name, description, price, photo, category) VALUES (%s, %s, %s, %s, %s)"
+        data = (name, description, price, photo_url, category)
+        cursor.execute(sql, data)
+        connection.commit()
+        connection.close()
 
-    # 5. Save the URL into the database instead of a local file path
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    sql = "INSERT INTO dining (name, description, price, photo, category) VALUES (%s, %s, %s, %s, %s)"
-    data = (name, description, price, photo_url, category)
-    cursor.execute(sql, data)
-    connection.commit()
-    connection.close()
-
-    # Return the secure_url so the frontend can use it or store it
-    return jsonify({
-        "Message": "Dining item added successfully",
-        "photo_url": photo_url
-    })
+        # Return the secure_url so the frontend can use it or store it
+        return jsonify({
+            "Message": "Dining item added successfully",
+            "photo_url": photo_url
+        })
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 @app.route("/api/addGallery", methods=['POST'])
 def addGallery():
-    name = request.form['name']
-    description = request.form['description']
-    photo = request.files.get('photo')
-    if not photo or not photo.filename:
-        return jsonify({"Error": "No photo uploaded in the 'photo' field"}), 400
+    try:
+        name = request.form.get('name')
+        description = request.form.get('description')
+        photo = request.files.get('photo')
 
-    upload_result = cloudinary.uploader.upload(
-        photo,
-        folder="hotel_management/gallery",
-        resource_type="image",
-        use_filename=True,
-        unique_filename=True
-    )
-    photo_url = upload_result["secure_url"]
+        try:
+            photo_url = _upload_to_cloudinary(photo, "home/hotel gallery")
+        except ValueError as ve:
+            return jsonify({"Error": str(ve)}), 400
+        except RuntimeError as re:
+            return jsonify({"Error": str(re)}), 500
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    sql = "INSERT INTO gallery (name, description, photo) VALUES (%s, %s, %s)"
-    data = (name, description, photo_url)
-    cursor.execute(sql, data)
-    connection.commit()
-    connection.close()
-    return jsonify({"Message": "Gallery item added successfully", "photo_url": photo_url})
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        sql = "INSERT INTO gallery (name, description, photo) VALUES (%s, %s, %s)"
+        data = (name, description, photo_url)
+        cursor.execute(sql, data)
+        connection.commit()
+        connection.close()
+        return jsonify({"Message": "Gallery item added successfully", "photo_url": photo_url})
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 
 
 @app.route("/api/placeorders", methods=['POST']) # This MUST be POST to save data
@@ -405,30 +433,31 @@ def getOrders(user_id):
 
 @app.route("/api/addRoom", methods=['POST'])
 def addRoom():
-    description = request.form['description']
-    price = request.form['price']
-    if 'photo' not in request.files or not request.files['photo'].filename:
-        return jsonify({"Error": "No photo uploaded in the 'photo' field"}), 400
-    photo = request.files['photo']
+    try:
+        description = request.form.get('description')
+        price = request.form.get('price')
+        photo = request.files.get('photo')
 
-    upload_result = cloudinary.uploader.upload(
-        photo,
-        folder="hotel_management/rooms",
-        resource_type="image",
-        use_filename=True,
-        unique_filename=True
-    )
-    photo_url = upload_result["secure_url"]
+        try:
+            photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
+        except ValueError as ve:
+            return jsonify({"Error": str(ve)}), 400
+        except RuntimeError as re:
+            return jsonify({"Error": str(re)}), 500
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    sql = "INSERT INTO rooms (description, price, photo) VALUES (%s, %s, %s)"
-    data = (description, price, photo_url)
-    cursor.execute(sql, data)
-    connection.commit()
-    room_id = cursor.lastrowid
-    connection.close()
-    return jsonify({"Message": "Room added successfully", "Room": {"room_id": room_id, "photo": photo_url}})
+        connection = get_db_connection()
+        cursor = connection.cursor()
+        sql = "INSERT INTO rooms (description, price, photo) VALUES (%s, %s, %s)"
+        data = (description, price, photo_url)
+        cursor.execute(sql, data)
+        connection.commit()
+        room_id = cursor.lastrowid
+        connection.close()
+
+        return jsonify({"Message": "Room added successfully", "Room": {"room_id": room_id, "photo": photo_url}})
+    except Exception as e:
+        print(f"Error: {e}")
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 
 
 @app.route("/api/user_bookings/<int:user_id>", methods=['GET'])
@@ -568,15 +597,14 @@ def update_dining():
     if 'photo' in request.files:
         photo = request.files['photo']
         if photo and photo.filename:
-            upload_result = cloudinary.uploader.upload(
-                photo,
-                folder="hotel_management/dining",
-                resource_type="image",
-                use_filename=True,
-                unique_filename=True
-            )
+            try:
+                photo_url = _upload_to_cloudinary(photo, "home/hotel dining")
+            except ValueError as ve:
+                return jsonify({"Error": str(ve)}), 400
+            except RuntimeError as re:
+                return jsonify({"Error": str(re)}), 500
             update_fields.append("photo = %s")
-            data_values.append(upload_result["secure_url"])
+            data_values.append(photo_url)
 
     if not update_fields:
         return jsonify({"Message": "No update fields were provided."}), 400
@@ -616,15 +644,14 @@ def update_room():
     if 'photo' in request.files:
         photo = request.files['photo']
         if photo and photo.filename:
-            upload_result = cloudinary.uploader.upload(
-                photo,
-                folder="hotel_management/rooms",
-                resource_type="image",
-                use_filename=True,
-                unique_filename=True
-            )
+            try:
+                photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
+            except ValueError as ve:
+                return jsonify({"Error": str(ve)}), 400
+            except RuntimeError as re:
+                return jsonify({"Error": str(re)}), 500
             update_fields.append("photo = %s")
-            data_values.append(upload_result["secure_url"])
+            data_values.append(photo_url)
 
     if not update_fields:
         return jsonify({"Message": "No update fields were provided."}), 400
@@ -637,6 +664,54 @@ def update_room():
     connection.close()
 
     return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
+
+
+
+@app.route('/api/updateGallery', methods=['POST'])
+def update_gallery():
+    gallery_id = request.form.get("gallery_id")
+    name = request.form.get("name")
+    description = request.form.get("description")
+
+    if not gallery_id:
+        return jsonify({"Error": "Missing gallery_id"}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    update_fields = []
+    data_values = []
+
+    if name:
+        update_fields.append("name = %s")
+        data_values.append(name)
+    if description:
+        update_fields.append("description = %s")
+        data_values.append(description)
+
+    if 'photo' in request.files:
+        photo = request.files['photo']
+        if photo and photo.filename:
+            try:
+                photo_url = _upload_to_cloudinary(photo, "home/hotel gallery")
+            except ValueError as ve:
+                return jsonify({"Error": str(ve)}), 400
+            except RuntimeError as re:
+                return jsonify({"Error": str(re)}), 500
+            update_fields.append("photo = %s")
+            data_values.append(photo_url)
+
+    if not update_fields:
+        return jsonify({"Message": "No update fields were provided."}), 400
+
+    sql = f"UPDATE gallery SET {', '.join(update_fields)} WHERE gallery_id = %s"
+    data_values.append(gallery_id)
+
+    cursor.execute(sql, tuple(data_values))
+    connection.commit()
+    connection.close()
+
+    return jsonify({"Success": "Gallery changes saved perfectly!"}), 200
 
 
 
@@ -671,4 +746,6 @@ def mpesa_payment():
     headers = {"Authorization": access_token, "Content-Type": "application/json"}
     response = requests.post("https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest", json=payload, headers=headers)
     return jsonify({"message": "Please Complete Payment in Your Phone."})
+
+
 
