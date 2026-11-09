@@ -626,13 +626,24 @@ def update_room():
     room_id = request.form.get("room_id")
     description = request.form.get("description")
     price = request.form.get("price")
-   
+
+    print(f"[updateRoom] ENTERED route - room_id={room_id!r}, description={description!r}, price={price!r}", flush=True)
+
     if not room_id:
+        print("[updateRoom] Missing room_id, returning 400", flush=True)
         return jsonify({"Error": "Missing room_id"}), 400
 
     try:
+        print("[updateRoom] Calling get_db_connection()...", flush=True)
         connection = get_db_connection()
+        print(f"[updateRoom] get_db_connection() returned: {connection!r} (type={type(connection).__name__})", flush=True)
+        if connection is None:
+            print("[updateRoom] connection is None", flush=True)
+            return jsonify({"Message": "Database error", "details": "Failed to establish database connection"}), 500
+
+        print("[updateRoom] Calling connection.cursor()...", flush=True)
         cursor = connection.cursor()
+        print(f"[updateRoom] connection.cursor() returned: {cursor!r} (type={type(cursor).__name__})", flush=True)
 
         update_fields = []
         data_values = []
@@ -650,26 +661,40 @@ def update_room():
                 try:
                     photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
                 except ValueError as ve:
+                    connection.close()
                     return jsonify({"Error": str(ve)}), 400
                 except RuntimeError as re:
+                    connection.close()
                     return jsonify({"Error": str(re)}), 500
                 update_fields.append("photo = %s")
                 data_values.append(photo_url)
 
         if not update_fields:
+            connection.close()
             return jsonify({"Message": "No update fields were provided."}), 400
 
         sql = f"UPDATE rooms SET {', '.join(update_fields)} WHERE room_id = %s"
         data_values.append(room_id)
+        print(f"[updateRoom] About to execute SQL: {sql!r} with params: {tuple(data_values)!r}", flush=True)
 
         cursor.execute(sql, tuple(data_values))
+        print("[updateRoom] cursor.execute() succeeded", flush=True)
+
+        print("[updateRoom] Calling connection.commit()...", flush=True)
         connection.commit()
+        print("[updateRoom] connection.commit() succeeded", flush=True)
+
+        print("[updateRoom] Calling connection.close()...", flush=True)
         connection.close()
+        print("[updateRoom] connection.close() succeeded", flush=True)
 
         return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[updateRoom] EXCEPTION: {type(e).__name__}: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
         return jsonify({"Message": "Database error", "details": str(e)}), 500
+
 @app.route('/api/updateGallery', methods=['POST'])
 def update_gallery():
     gallery_id = request.form.get("gallery_id")
