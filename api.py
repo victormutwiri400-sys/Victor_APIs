@@ -630,7 +630,17 @@ def update_room():
 
     try:
         connection = get_db_connection()
+        if connection is None:
+            return jsonify({"Message": "Database error", "details": "Failed to establish database connection"}), 500
+
+        if not callable(getattr(connection, "cursor", None)):
+            connection.close()
+            return jsonify({"Message": "Database error", "details": "Failed to create database cursor"}), 500
         cursor = connection.cursor()
+
+        if not callable(getattr(cursor, "execute", None)):
+            connection.close()
+            return jsonify({"Message": "Database error", "details": "Failed to execute database query"}), 500
 
         update_fields = []
         data_values = []
@@ -648,20 +658,30 @@ def update_room():
                 try:
                     photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
                 except ValueError as ve:
+                    connection.close()
                     return jsonify({"Error": str(ve)}), 400
                 except RuntimeError as re:
+                    connection.close()
                     return jsonify({"Error": str(re)}), 500
                 update_fields.append("photo = %s")
                 data_values.append(photo_url)
 
         if not update_fields:
+            connection.close()
             return jsonify({"Message": "No update fields were provided."}), 400
 
         sql = f"UPDATE rooms SET {', '.join(update_fields)} WHERE room_id = %s"
         data_values.append(room_id)
 
         cursor.execute(sql, tuple(data_values))
+
+        if not callable(getattr(connection, "commit", None)):
+            connection.close()
+            return jsonify({"Message": "Database error", "details": "Failed to commit database transaction"}), 500
         connection.commit()
+
+        if not callable(getattr(connection, "close", None)):
+            return jsonify({"Message": "Database error", "details": "Failed to close database connection"}), 500
         connection.close()
 
         return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
