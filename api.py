@@ -531,7 +531,7 @@ def gallery():
     connection.close()
     return jsonify(data)
 
-def get_db_connection(cursorclass=None):
+def get_db_connection(cursorclass=pymysql.cursors.DictCursor):
     """Open a NEW MySQL connection for this request and register it for
     guaranteed teardown close (serverless-safe). One connection per request,
     never shared across requests. Routes keep their own explicit close();
