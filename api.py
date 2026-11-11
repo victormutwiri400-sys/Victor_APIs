@@ -623,27 +623,44 @@ def update_dining():
 
 @app.route('/api/updateRoom', methods=['POST'])
 def update_room():
-    room_id = request.form.get("room_id")
-    description = request.form.get("description")
-    price = request.form.get("price")
+    print("[updateRoom] ENTERED route", flush=True)
 
-    print(f"[updateRoom] ENTERED route - room_id={room_id!r}, description={description!r}, price={price!r}", flush=True)
+    # Detect content type: JSON vs multipart/form-data
+    content_type = request.content_type or ""
+    is_json = "application/json" in content_type
+    is_multipart = "multipart/form-data" in content_type
+
+    room_id = None
+    description = None
+    price = None
+    image_url = None
+    photo_file = None
+
+    if is_json:
+        data = request.get_json(silent=True) or {}
+        room_id = data.get("room_id")
+        description = data.get("description")
+        price = data.get("price")
+        image_url = data.get("image_url")
+        print(f"[updateRoom] JSON payload: room_id={room_id!r}, image_url={image_url!r}", flush=True)
+    elif is_multipart:
+        room_id = request.form.get("room_id")
+        description = request.form.get("description")
+        price = request.form.get("price")
+        photo_file = request.files.get("photo")
+        print(f"[updateRoom] Multipart: room_id={room_id!r}, photo_file={photo_file.filename if photo_file else None}", flush=True)
 
     if not room_id:
-        print("[updateRoom] Missing room_id, returning 400", flush=True)
         return jsonify({"Error": "Missing room_id"}), 400
 
     try:
         print("[updateRoom] Calling get_db_connection()...", flush=True)
         connection = get_db_connection()
-        print(f"[updateRoom] get_db_connection() returned: {connection!r} (type={type(connection).__name__})", flush=True)
+        print(f"[updateRoom] get_db_connection() returned: {connection!r}", flush=True)
         if connection is None:
-            print("[updateRoom] connection is None", flush=True)
             return jsonify({"Message": "Database error", "details": "Failed to establish database connection"}), 500
 
-        print("[updateRoom] Calling connection.cursor()...", flush=True)
         cursor = connection.cursor()
-        print(f"[updateRoom] connection.cursor() returned: {cursor!r} (type={type(cursor).__name__})", flush=True)
 
         update_fields = []
         data_values = []
@@ -655,19 +672,29 @@ def update_room():
             update_fields.append("price = %s")
             data_values.append(float(price))
 
-        if 'photo' in request.files:
-            photo = request.files['photo']
-            if photo and photo.filename:
-                try:
-                    photo_url = _upload_to_cloudinary(photo, "home/hotel rooms")
-                except ValueError as ve:
-                    connection.close()
-                    return jsonify({"Error": str(ve)}), 400
-                except RuntimeError as re:
-                    connection.close()
-                    return jsonify({"Error": str(re)}), 500
-                update_fields.append("photo = %s")
-                data_values.append(photo_url)
+        # Handle remote image URL from JSON payload
+        if image_url:
+            try:
+                upload_result = cloudinary.uploader.upload(image_url, folder="room_images")
+                saved_url = upload_result.get("secure_url")
+            except Exception as exc:
+                connection.close()
+                return jsonify({"Error": "Cloudinary upload failed: " + str(exc)}), 500
+            update_fields.append("photo = %s")
+            data_values.append(saved_url)
+            print(f"[updateRoom] Uploaded remote image URL: {saved_url}", flush=True)
+
+        # Handle local file upload from multipart
+        if photo_file and photo_file.filename:
+            try:
+                upload_result = cloudinary.uploader.upload(photo_file, folder="home/hotel rooms")
+                saved_url = upload_result.get("secure_url")
+            except Exception as exc:
+                connection.close()
+                return jsonify({"Error": "Cloudinary upload failed: " + str(exc)}), 500
+            update_fields.append("photo = %s")
+            data_values.append(saved_url)
+            print(f"[updateRoom] Uploaded local file: {saved_url}", flush=True)
 
         if not update_fields:
             connection.close()
@@ -680,11 +707,9 @@ def update_room():
         cursor.execute(sql, tuple(data_values))
         print("[updateRoom] cursor.execute() succeeded", flush=True)
 
-        print("[updateRoom] Calling connection.commit()...", flush=True)
         connection.commit()
         print("[updateRoom] connection.commit() succeeded", flush=True)
 
-        print("[updateRoom] Calling connection.close()...", flush=True)
         connection.close()
         print("[updateRoom] connection.close() succeeded", flush=True)
 
