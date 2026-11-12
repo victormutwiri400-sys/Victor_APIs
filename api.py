@@ -13,6 +13,7 @@ from requests.auth import HTTPBasicAuth
 import cloudinary
 import cloudinary.uploader
 import cloudinary.api
+from urllib.parse import urlsplit
 
 # =====================================================================
 # SECRETS & CONFIGURATION â€” environment variables only.
@@ -67,6 +68,24 @@ def _allowed_image(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_IMAGE_EXTENSIONS
 
 
+def _cloudinary_secure_url(source, folder, **upload_options):
+    """Upload an image source and require Cloudinary's secure URL response."""
+    try:
+        upload_result = cloudinary.uploader.upload(
+            source,
+            folder=folder,
+            resource_type="image",
+            **upload_options,
+        )
+    except Exception as exc:
+        raise RuntimeError("Cloudinary upload failed: " + str(exc))
+
+    secure_url = upload_result.get("secure_url") if isinstance(upload_result, dict) else None
+    if not secure_url:
+        raise RuntimeError("Cloudinary upload failed: response did not include secure_url")
+    return secure_url
+
+
 def _upload_to_cloudinary(photo, folder):
     """Validate and upload a FileStorage image to Cloudinary.
 
@@ -80,17 +99,30 @@ def _upload_to_cloudinary(photo, folder):
         raise ValueError(
             "Invalid image type. Allowed: jpg, jpeg, png, gif, webp"
         )
-    try:
-        upload_result = cloudinary.uploader.upload(
-            photo,
-            folder=folder,
-            resource_type="image",
-            use_filename=True,
-            unique_filename=True,
-        )
-        return upload_result["secure_url"]
-    except Exception as exc:
-        raise RuntimeError("Cloudinary upload failed: " + str(exc))
+    return _cloudinary_secure_url(
+        photo,
+        folder,
+        use_filename=True,
+        unique_filename=True,
+    )
+
+
+def _upload_remote_image_to_cloudinary(image_url, folder):
+    """Upload an HTTP(S) image URL and return only its Cloudinary secure URL."""
+    image_url = image_url.strip() if isinstance(image_url, str) else ""
+    parsed_url = urlsplit(image_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("Image URL must be a valid HTTP or HTTPS URL")
+    return _cloudinary_secure_url(image_url, folder)
+
+
+def _upload_replacement_image(photo_file, image_url, folder):
+    """Upload a provided local file or remote URL; return None if absent."""
+    if photo_file and photo_file.filename:
+        return _upload_to_cloudinary(photo_file, folder)
+    if image_url:
+        return _upload_remote_image_to_cloudinary(image_url, folder)
+    return None
 
 
 # initializing the flask app
@@ -572,53 +604,84 @@ def _close_db_connections(exception=None):
 # ==========================================================
 @app.route('/api/updateDining', methods=['POST'])
 def update_dining():
-    dining_id = request.form.get("dining_id")
-    name = request.form.get("name")
-    description = request.form.get("description")
-    price = request.form.get("price")
-    
+    # Detect content type: JSON vs multipart/form-data
+    content_type = request.content_type or ""
+    is_json = "application/json" in content_type
+    is_multipart = "multipart/form-data" in content_type
+
+    dining_id = None
+    name = None
+    description = None
+    price = None
+    image_url = None
+    photo_file = None
+
+    if is_json:
+        data = request.get_json(silent=True) or {}
+        dining_id = data.get("dining_id")
+        name = data.get("name")
+        description = data.get("description")
+        price = data.get("price")
+        image_url = data.get("image_url")
+    elif is_multipart:
+        dining_id = request.form.get("dining_id")
+        name = request.form.get("name")
+        description = request.form.get("description")
+        price = request.form.get("price")
+        image_url = request.form.get("image_url")
+        photo_file = request.files.get("photo")
+
     if not dining_id:
         return jsonify({"Error": "Missing dining_id"}), 400
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
 
-    update_fields = []
-    data_values = []
+        update_fields = []
+        data_values = []
 
-    if name:
-        update_fields.append("name = %s")
-        data_values.append(name)
-    if description:
-        update_fields.append("description = %s")
-        data_values.append(description)
-    if price:
-        update_fields.append("price = %s")
-        data_values.append(float(price))
+        if name:
+            update_fields.append("name = %s")
+            data_values.append(name)
+        if description:
+            update_fields.append("description = %s")
+            data_values.append(description)
+        if price:
+            update_fields.append("price = %s")
+            data_values.append(float(price))
 
-    if 'photo' in request.files:
-        photo = request.files['photo']
-        if photo and photo.filename:
-            try:
-                photo_url = _upload_to_cloudinary(photo, "home/hotel dining")
-            except ValueError as ve:
-                return jsonify({"Error": str(ve)}), 400
-            except RuntimeError as re:
-                return jsonify({"Error": str(re)}), 500
+        try:
+            saved_url = _upload_replacement_image(
+                photo_file, image_url, "home/hotel dining"
+            )
+        except ValueError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 400
+        except RuntimeError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 500
+        if saved_url:
             update_fields.append("photo = %s")
-            data_values.append(photo_url)
+            data_values.append(saved_url)
 
-    if not update_fields:
-        return jsonify({"Message": "No update fields were provided."}), 400
+        if not update_fields:
+            connection.close()
+            return jsonify({"Message": "No update fields were provided."}), 400
 
-    sql = f"UPDATE dining SET {', '.join(update_fields)} WHERE dining_id = %s"
-    data_values.append(dining_id)
-    
-    cursor.execute(sql, tuple(data_values))
-    connection.commit()
-    connection.close()
+        sql = f"UPDATE dining SET {', '.join(update_fields)} WHERE dining_id = %s"
+        data_values.append(dining_id)
 
-    return jsonify({"Success": "Dining menu changes saved perfectly!"}), 200
+        cursor.execute(sql, tuple(data_values))
+        connection.commit()
+        connection.close()
+
+        return jsonify({"Success": "Dining menu changes saved perfectly!"}), 200
+    except Exception as e:
+        print(f"[updateDining] EXCEPTION: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 
 
 @app.route('/api/updateRoom', methods=['POST'])
@@ -647,6 +710,7 @@ def update_room():
         room_id = request.form.get("room_id")
         description = request.form.get("description")
         price = request.form.get("price")
+        image_url = request.form.get("image_url")
         photo_file = request.files.get("photo")
         print(f"[updateRoom] Multipart: room_id={room_id!r}, photo_file={photo_file.filename if photo_file else None}", flush=True)
 
@@ -672,29 +736,20 @@ def update_room():
             update_fields.append("price = %s")
             data_values.append(float(price))
 
-        # Handle remote image URL from JSON payload
-        if image_url:
-            try:
-                upload_result = cloudinary.uploader.upload(image_url, folder="room_images")
-                saved_url = upload_result.get("secure_url")
-            except Exception as exc:
-                connection.close()
-                return jsonify({"Error": "Cloudinary upload failed: " + str(exc)}), 500
+        try:
+            saved_url = _upload_replacement_image(
+                photo_file, image_url, "home/hotel rooms"
+            )
+        except ValueError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 400
+        except RuntimeError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 500
+        if saved_url:
             update_fields.append("photo = %s")
             data_values.append(saved_url)
-            print(f"[updateRoom] Uploaded remote image URL: {saved_url}", flush=True)
-
-        # Handle local file upload from multipart
-        if photo_file and photo_file.filename:
-            try:
-                upload_result = cloudinary.uploader.upload(photo_file, folder="home/hotel rooms")
-                saved_url = upload_result.get("secure_url")
-            except Exception as exc:
-                connection.close()
-                return jsonify({"Error": "Cloudinary upload failed: " + str(exc)}), 500
-            update_fields.append("photo = %s")
-            data_values.append(saved_url)
-            print(f"[updateRoom] Uploaded local file: {saved_url}", flush=True)
+            print(f"[updateRoom] Uploaded replacement image: {saved_url}", flush=True)
 
         if not update_fields:
             connection.close()
@@ -722,49 +777,78 @@ def update_room():
 
 @app.route('/api/updateGallery', methods=['POST'])
 def update_gallery():
-    gallery_id = request.form.get("gallery_id")
-    name = request.form.get("name")
-    description = request.form.get("description")
+    # Detect content type: JSON vs multipart/form-data
+    content_type = request.content_type or ""
+    is_json = "application/json" in content_type
+    is_multipart = "multipart/form-data" in content_type
+
+    gallery_id = None
+    name = None
+    description = None
+    image_url = None
+    photo_file = None
+
+    if is_json:
+        data = request.get_json(silent=True) or {}
+        gallery_id = data.get("gallery_id")
+        name = data.get("name")
+        description = data.get("description")
+        image_url = data.get("image_url")
+    elif is_multipart:
+        gallery_id = request.form.get("gallery_id")
+        name = request.form.get("name")
+        description = request.form.get("description")
+        image_url = request.form.get("image_url")
+        photo_file = request.files.get("photo")
 
     if not gallery_id:
         return jsonify({"Error": "Missing gallery_id"}), 400
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
 
-    update_fields = []
-    data_values = []
+        update_fields = []
+        data_values = []
 
-    if name:
-        update_fields.append("name = %s")
-        data_values.append(name)
-    if description:
-        update_fields.append("description = %s")
-        data_values.append(description)
+        if name:
+            update_fields.append("name = %s")
+            data_values.append(name)
+        if description:
+            update_fields.append("description = %s")
+            data_values.append(description)
 
-    if 'photo' in request.files:
-        photo = request.files['photo']
-        if photo and photo.filename:
-            try:
-                photo_url = _upload_to_cloudinary(photo, "home/hotel gallery")
-            except ValueError as ve:
-                return jsonify({"Error": str(ve)}), 400
-            except RuntimeError as re:
-                return jsonify({"Error": str(re)}), 500
+        try:
+            saved_url = _upload_replacement_image(
+                photo_file, image_url, "home/hotel gallery"
+            )
+        except ValueError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 400
+        except RuntimeError as exc:
+            connection.close()
+            return jsonify({"Error": str(exc)}), 500
+        if saved_url:
             update_fields.append("photo = %s")
-            data_values.append(photo_url)
+            data_values.append(saved_url)
 
-    if not update_fields:
-        return jsonify({"Message": "No update fields were provided."}), 400
+        if not update_fields:
+            connection.close()
+            return jsonify({"Message": "No update fields were provided."}), 400
 
-    sql = f"UPDATE gallery SET {', '.join(update_fields)} WHERE gallery_id = %s"
-    data_values.append(gallery_id)
+        sql = f"UPDATE gallery SET {', '.join(update_fields)} WHERE gallery_id = %s"
+        data_values.append(gallery_id)
 
-    cursor.execute(sql, tuple(data_values))
-    connection.commit()
-    connection.close()
+        cursor.execute(sql, tuple(data_values))
+        connection.commit()
+        connection.close()
 
-    return jsonify({"Success": "Gallery changes saved perfectly!"}), 200
+        return jsonify({"Success": "Gallery changes saved perfectly!"}), 200
+    except Exception as e:
+        print(f"[updateGallery] EXCEPTION: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"Message": "Database error", "details": str(e)}), 500
 
 
 
