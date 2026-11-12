@@ -17,8 +17,8 @@ from urllib.parse import urlsplit
 
 # =====================================================================
 # SECRETS & CONFIGURATION â€” environment variables only.
-# The application FAILS FAST at startup if a required variable is
-# missing. The error names the variable but NEVER its value.
+# Secret values come only from environment variables. They currently default
+# to empty strings, so configure them in Vercel for their features to work.
 # =====================================================================
 
 import os
@@ -78,7 +78,8 @@ def _cloudinary_secure_url(source, folder, **upload_options):
             **upload_options,
         )
     except Exception as exc:
-        raise RuntimeError("Cloudinary upload failed: " + str(exc))
+        # Provider exception text can contain signed URLs or request details.
+        raise RuntimeError("Cloudinary upload failed") from None
 
     secure_url = upload_result.get("secure_url") if isinstance(upload_result, dict) else None
     if not secure_url:
@@ -132,17 +133,30 @@ app = Flask(__name__)
 if FLASK_SECRET_KEY:
     app.secret_key = FLASK_SECRET_KEY
 
-# CORS: allow ONLY explicitly configured trusted origins. Never unrestricted.
-# Set CORS_ALLOWED_ORIGINS (comma-separated full origins) in the environment,
-# Set CORS_ALLOWED_ORIGINS to comma-separated full origins. An unset allowlist
-# permits no cross-origin API requests.
-CORS_ORIGINS_DEFAULT = os.environ.get("CORS_ALLOWED_ORIGINS", "")
-CORS_ALLOWED_ORIGINS = [
+# CORS allowlist for the deployed frontend and local development. Additional
+# trusted origins may be supplied through CORS_ALLOWED_ORIGINS in Vercel.
+CORS_REQUIRED_ORIGINS = {
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://fullstack-nu-umber.vercel.app",
+}
+CORS_CONFIGURED_ORIGINS = {
     origin.strip().rstrip("/")
-    for origin in CORS_ORIGINS_DEFAULT.split(",")
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
     if origin.strip().rstrip("/")
-]
-CORS(app, resources={r"/api/*": {"origins": CORS_ALLOWED_ORIGINS}})
+}
+CORS_ALLOWED_ORIGINS = sorted(CORS_REQUIRED_ORIGINS | CORS_CONFIGURED_ORIGINS)
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": CORS_ALLOWED_ORIGINS,
+            "methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "max_age": 600,
+        }
+    },
+)
 
 # signup route
 @app.route("/api/signup", methods=["POST"])
@@ -219,8 +233,8 @@ def Profile():
     except Exception as e:
         # This prints the REAL error (like "Column 'county' not found") 
         # to your Alwaysdata console/logs
-        print(f"Error: {e}") 
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"Profile request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 @app.route("/api/createAdmin", methods=["POST"])
 def create_admin():
@@ -375,8 +389,8 @@ def addDiningCloudinary():
             "photo_url": photo_url
         })
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"Dining upload request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 @app.route("/api/addGallery", methods=['POST'])
 def addGallery():
     try:
@@ -400,8 +414,8 @@ def addGallery():
         connection.close()
         return jsonify({"Message": "Gallery item added successfully", "photo_url": photo_url})
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"Gallery upload request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 
 @app.route("/api/placeorders", methods=['POST']) # This MUST be POST to save data
@@ -437,7 +451,7 @@ def placeOrders():
         connection.commit()
         return jsonify({"Message": "Order placed successfully"}), 201
     except Exception as e:
-        return jsonify({"Error": str(e)}), 500
+        return jsonify({"Error": "Order placement failed"}), 500
     finally:
         connection.close()
 
@@ -490,8 +504,8 @@ def addRoom():
 
         return jsonify({"Message": "Room added successfully", "Room": {"room_id": room_id, "photo": photo_url}})
     except Exception as e:
-        print(f"Error: {e}")
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"Room upload request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 
 @app.route("/api/user_bookings/<int:user_id>", methods=['GET'])
@@ -512,7 +526,7 @@ def getUserBookings(user_id):
         results = cursor.fetchall()
         return jsonify({"Message": "Bookings retrieved successfully", "Bookings": results})
     except Exception as e:
-        return jsonify({"Message": "Database Error", "Error": str(e)}), 500
+        return jsonify({"Message": "Database Error", "Error": "Request failed"}), 500
     finally:
         connection.close()
 
@@ -542,7 +556,7 @@ def rooms():
         
         return jsonify(data)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "Request failed"}), 500
 
 @app.route("/api/dining", methods=['GET'])
 def dining():
@@ -678,16 +692,12 @@ def update_dining():
 
         return jsonify({"Success": "Dining menu changes saved perfectly!"}), 200
     except Exception as e:
-        print(f"[updateDining] EXCEPTION: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"[updateDining] request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 
 @app.route('/api/updateRoom', methods=['POST'])
 def update_room():
-    print("[updateRoom] ENTERED route", flush=True)
-
     # Detect content type: JSON vs multipart/form-data
     content_type = request.content_type or ""
     is_json = "application/json" in content_type
@@ -705,22 +715,18 @@ def update_room():
         description = data.get("description")
         price = data.get("price")
         image_url = data.get("image_url")
-        print(f"[updateRoom] JSON payload: room_id={room_id!r}, image_url={image_url!r}", flush=True)
     elif is_multipart:
         room_id = request.form.get("room_id")
         description = request.form.get("description")
         price = request.form.get("price")
         image_url = request.form.get("image_url")
         photo_file = request.files.get("photo")
-        print(f"[updateRoom] Multipart: room_id={room_id!r}, photo_file={photo_file.filename if photo_file else None}", flush=True)
 
     if not room_id:
         return jsonify({"Error": "Missing room_id"}), 400
 
     try:
-        print("[updateRoom] Calling get_db_connection()...", flush=True)
         connection = get_db_connection()
-        print(f"[updateRoom] get_db_connection() returned: {connection!r}", flush=True)
         if connection is None:
             return jsonify({"Message": "Database error", "details": "Failed to establish database connection"}), 500
 
@@ -749,7 +755,6 @@ def update_room():
         if saved_url:
             update_fields.append("photo = %s")
             data_values.append(saved_url)
-            print(f"[updateRoom] Uploaded replacement image: {saved_url}", flush=True)
 
         if not update_fields:
             connection.close()
@@ -757,23 +762,16 @@ def update_room():
 
         sql = f"UPDATE rooms SET {', '.join(update_fields)} WHERE room_id = %s"
         data_values.append(room_id)
-        print(f"[updateRoom] About to execute SQL: {sql!r} with params: {tuple(data_values)!r}", flush=True)
-
         cursor.execute(sql, tuple(data_values))
-        print("[updateRoom] cursor.execute() succeeded", flush=True)
 
         connection.commit()
-        print("[updateRoom] connection.commit() succeeded", flush=True)
 
         connection.close()
-        print("[updateRoom] connection.close() succeeded", flush=True)
 
         return jsonify({"Success": "Room criteria changes saved perfectly!"}), 200
     except Exception as e:
-        print(f"[updateRoom] EXCEPTION: {type(e).__name__}: {e}", flush=True)
-        import traceback
-        traceback.print_exc()
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"[updateRoom] request failed: {type(e).__name__}", flush=True)
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 @app.route('/api/updateGallery', methods=['POST'])
 def update_gallery():
@@ -845,10 +843,8 @@ def update_gallery():
 
         return jsonify({"Success": "Gallery changes saved perfectly!"}), 200
     except Exception as e:
-        print(f"[updateGallery] EXCEPTION: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({"Message": "Database error", "details": str(e)}), 500
+        print(f"[updateGallery] request failed: {type(e).__name__}")
+        return jsonify({"Message": "Database error", "details": "Request failed"}), 500
 
 
 

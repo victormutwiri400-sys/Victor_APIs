@@ -4,24 +4,27 @@ The deployment also requires `MPESA_CALLBACK_URL` and accepts
 `CORS_ALLOWED_ORIGINS` as a comma-separated frontend-origin allowlist. Keep
 real values only in the hosting provider's environment settings.
 
-This backend reads **all secrets from environment variables**. It never falls
-back to hardcoded credentials, and it **fails fast** at startup if a required
-variable is missing (the error message names the variable, never its value).
+This backend reads **all secrets from environment variables** and has no
+hardcoded secret values. Secret variables currently default to empty strings,
+so importing the Flask app does not fail when they are absent; database,
+Cloudinary, and M-Pesa features still require valid values in the deployment
+environment.
 
-## Required variables (the API will not start without these)
+## Runtime configuration
 
 | Variable | Used by | Required? |
 |---|---|---|
-| `MYSQL_PASSWORD` | Every `pymysql.connect(...)` | ✅ required (no default) |
+| `MYSQL_PASSWORD` | Every `pymysql.connect(...)` | required for database access |
 | `MYSQL_HOST` | Every `pymysql.connect(...)` | default `mysql-victordesigner.alwaysdata.net` |
 | `MYSQL_USER` | Every `pymysql.connect(...)` | default `victordesigner` |
 | `MYSQL_DATABASE` | Every `pymysql.connect(...)` | default `victordesigner_fullstack` |
-| `CLOUDINARY_CLOUD_NAME` | `cloudinary.config(...)` | ✅ required |
-| `CLOUDINARY_API_KEY` | `cloudinary.config(...)` | ✅ required |
-| `CLOUDINARY_API_SECRET` | `cloudinary.config(...)` | ✅ required |
-| `MPESA_CONSUMER_KEY` | `/api/mpesa_payment` | ✅ required |
-| `MPESA_CONSUMER_SECRET` | `/api/mpesa_payment` | ✅ required |
-| `MPESA_PASSKEY` | `/api/mpesa_payment` | ✅ required |
+| `CLOUDINARY_CLOUD_NAME` | `cloudinary.config(...)` | required for image uploads |
+| `CLOUDINARY_API_KEY` | `cloudinary.config(...)` | required for image uploads |
+| `CLOUDINARY_API_SECRET` | `cloudinary.config(...)` | required for image uploads |
+| `MPESA_CONSUMER_KEY` | `/api/mpesa_payment` | required for M-Pesa payments |
+| `MPESA_CONSUMER_SECRET` | `/api/mpesa_payment` | required for M-Pesa payments |
+| `MPESA_PASSKEY` | `/api/mpesa_payment` | required for M-Pesa payments |
+| `MPESA_CALLBACK_URL` | `/api/mpesa_payment` | required for M-Pesa payments |
 | `FLASK_SECRET_KEY` | Flask session/token signing | optional (recommended) |
 
 `cloud_name` is a public identifier, but it is still read from the environment
@@ -30,31 +33,16 @@ URLs are public configuration and remain ordinary constants in the code.
 
 ## Local development
 
-The Flask app does **not** auto-load a `.env` file (production relies on the
-hosting platform, not a local file). Two options for local runs:
+Credentials must be entered only in private shell/environment settings.
+`.env` files remain git-ignored and are not used in production.
 
-**Option A — set the variables in your shell (PowerShell):**
-```powershell
-$env:MYSQL_PASSWORD=""
-$env:CLOUDINARY_CLOUD_NAME="nxkypqxa"
-$env:CLOUDINARY_API_KEY="134235845124775"
-$env:CLOUDINARY_API_SECRET="ojDy41cD-Y0aRbbEqBC223CbLzs"
-$env:MPESA_CONSUMER_KEY="GTWADFxIpUfDoNikNGqq1C3023evM6UH"
-$env:MPESA_CONSUMER_SECRET="amFbAoUByPV2rM5A"
-$env:MPESA_PASSKEY="bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919"
-python api.py
-```
+## Vercel
 
-**Option B — optional python-dotenv for development only** (not used by the
-deployed app; install it only in your dev environment):
-```powershell
-pip install python-dotenv
-```
-and create a local `.env` from `.env.example`, then run with:
-```
-python -c "import os; os.chdir('.'); from dotenv import load_dotenv; load_dotenv(); import api; api.app.run(debug=True)"
-```
-`.env` is git-ignored.
+- `vercel.json` builds `api.py` with `@vercel/python` and routes `/api/*` to that Flask function.
+- `app.py` re-exports the `app` from `api.py`; there is one Flask app and the existing API routes remain registered there.
+- Configure the MySQL, Cloudinary, and M-Pesa variables listed in the table in Vercel Project Settings → Environment Variables, for each deployment environment that needs them. Configure a stable random `FLASK_SECRET_KEY` if sessions/signing are used.
+- The backend always allows `http://localhost:3000`, `http://127.0.0.1:3000`, and `https://fullstack-nu-umber.vercel.app`; `CORS_ALLOWED_ORIGINS` may add further trusted origins. `OPTIONS` is enabled for `/api/*`, with `Content-Type` and `Authorization` allowed.
+- The canonical backend deployment URL is `https://victor-ap-is-rosy.vercel.app`; the source change takes effect there only after a successful Vercel deployment.
 
 ## AlwaysData (production)
 
